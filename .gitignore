@@ -1,0 +1,8 @@
+.DS_Store
+plugin/
+shada/
+sessions/
+swap/
+undo/
+.claude/
+*.log
