@@ -8,6 +8,7 @@ return {
   config = function()
     local dap = require("dap")
     local dapui = require("dapui")
+    local cpp_tools = require("paulcontreras.core.cpp")
 
     require("nvim-dap-virtual-text").setup({
       commented = true, -- show virtual text as comment
@@ -41,12 +42,21 @@ return {
     dap.listeners.before.event_terminated["dapui_config"] = function() dapui.close() end
     dap.listeners.before.event_exited["dapui_config"] = function() dapui.close() end
 
-    -- codelldb adapter (installed via Mason)
+    -- codelldb adapter (installed via Mason). On Windows the binary is
+    -- codelldb.exe, so resolve the extension at runtime.
+    local codelldb_cmd = vim.fn.stdpath("data") .. "/mason/bin/codelldb"
+    if cpp_tools.is_windows() and vim.fn.executable(codelldb_cmd) ~= 1 then
+      if vim.fn.executable(codelldb_cmd .. ".exe") == 1 then
+        codelldb_cmd = codelldb_cmd .. ".exe"
+      elseif vim.fn.executable(codelldb_cmd .. ".cmd") == 1 then
+        codelldb_cmd = codelldb_cmd .. ".cmd"
+      end
+    end
     dap.adapters.codelldb = {
       type = "server",
       port = "${port}",
       executable = {
-        command = vim.fn.stdpath("data") .. "/mason/bin/codelldb",
+        command = codelldb_cmd,
         args = { "--port", "${port}" },
       },
     }
@@ -70,9 +80,16 @@ return {
         request = "launch",
         program = function()
           local src = vim.fn.expand("%:p")
-          local out = vim.fn.expand("%:p:r")
+          local out = cpp_tools.output_for(src)
+          local compiler = cpp_tools.compiler()
           -- compile with debug symbols, no optimizations
-          local cmd = string.format("g++ -std=c++17 -g -O0 -o %s %s", out, src)
+          -- shellescape quotes paths with spaces (e.g. Program Files on Win).
+          local cmd = string.format(
+            "%s -std=c++17 -g -O0 -o %s %s",
+            compiler,
+            vim.fn.shellescape(out),
+            vim.fn.shellescape(src)
+          )
           local result = vim.fn.system(cmd)
           if vim.v.shell_error ~= 0 then
             vim.notify("Compile error:\n" .. result, vim.log.levels.ERROR)

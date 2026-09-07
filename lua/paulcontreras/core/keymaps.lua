@@ -41,30 +41,52 @@ local function run_in_term(cmd)
 	vim.cmd("startinsert")
 end
 
+local cpp_tools = require("paulcontreras.core.cpp")
+
 local function cpp_compiler()
-	return vim.fn.executable("g++-14") == 1 and "g++-14" or "g++"
+	return cpp_tools.compiler()
+end
+
+local function cpp_output(src)
+	return cpp_tools.output_for(src)
 end
 
 local function shell_quote(value)
 	return vim.fn.shellescape(value)
 end
 
+local function save_cpp_buffer()
+	if vim.bo.filetype ~= "cpp" or vim.fn.expand("%:p") == "" then
+		vim.notify("Open a C++ file first", vim.log.levels.ERROR)
+		return false
+	end
+	vim.cmd.update()
+	return true
+end
+
 -- Compile only  (<leader>cc)
 keymap.set("n", "<leader>cc", function()
+	if not save_cpp_buffer() then
+		return
+	end
 	local src = vim.fn.expand("%:p")
-	local out = vim.fn.expand("%:p:r")
+	local out = cpp_output(src)
 	run_in_term(
-		string.format("%s -std=c++17 -O2 -Wall -Wextra -o %s %s", cpp_compiler(), shell_quote(out), shell_quote(src))
+		string.format("%s -std=gnu++17 -O2 -Wall -Wextra -o %s %s", cpp_compiler(), shell_quote(out), shell_quote(src))
 	)
 end, { desc = "C++: Compile" })
 
 -- Compile & run  (<leader>cr)
 keymap.set("n", "<leader>cr", function()
+	if not save_cpp_buffer() then
+		return
+	end
 	local src = vim.fn.expand("%:p")
-	local out = vim.fn.expand("%:p:r")
+	local out = cpp_output(src)
 	run_in_term(
 		string.format(
-			"%s -std=c++17 -O2 -Wall -Wextra -o %s %s && echo '--- Running ---' && %s",
+			-- NOTE: `echo --- ... ---` without quotes works in bash, cmd, and PowerShell.
+			"%s -std=gnu++17 -O2 -Wall -Wextra -o %s %s && echo --- Running --- && %s",
 			cpp_compiler(),
 			shell_quote(out),
 			shell_quote(src),
@@ -75,8 +97,11 @@ end, { desc = "C++: Compile & Run" })
 
 -- Compile & run with input.txt  (<leader>ci)
 keymap.set("n", "<leader>ci", function()
+	if not save_cpp_buffer() then
+		return
+	end
 	local src = vim.fn.expand("%:p")
-	local out = vim.fn.expand("%:p:r")
+	local out = cpp_output(src)
 	local dir = vim.fn.expand("%:p:h")
 	local inp = dir .. "/input.txt"
 	if vim.fn.filereadable(inp) == 0 then
@@ -84,7 +109,7 @@ keymap.set("n", "<leader>ci", function()
 	end
 	run_in_term(
 		string.format(
-			"%s -std=c++17 -O2 -Wall -Wextra -o %s %s && echo '--- Running (input.txt) ---' && %s < %s",
+			"%s -std=gnu++17 -O2 -Wall -Wextra -o %s %s && echo --- Running (input.txt) --- && %s < %s",
 			cpp_compiler(),
 			shell_quote(out),
 			shell_quote(src),
@@ -97,33 +122,37 @@ end, { desc = "C++: Compile & Run with input.txt" })
 -- Quick generate compile_commands.json or .clangd for C++ projects / CP files.
 keymap.set("n", "<leader>cmk", function()
 	if vim.fn.filereadable("CMakeLists.txt") == 1 then
-		run_in_term("cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build && cp build/compile_commands.json .")
+		if cpp_tools.is_windows() then
+			run_in_term("cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build && copy /Y build\\compile_commands.json compile_commands.json")
+		else
+			run_in_term("cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -B build && cp build/compile_commands.json .")
+		end
 	else
 		vim.notify("No CMakeLists.txt found. Run 'bear -- g++ ...' manually.", vim.log.levels.WARN)
 	end
 end, { desc = "C++: Generate compile_commands.json" })
 
 keymap.set("n", "<leader>cfd", function()
-	local gcc_includes = vim.fn.glob("/opt/homebrew/opt/gcc/include/c++/*", false, true)
-	local target_includes = vim.fn.glob("/opt/homebrew/opt/gcc/include/c++/*/aarch64-apple-darwin*", false, true)
+	local compiler = vim.fn.exepath(cpp_compiler())
+	if compiler == "" then
+		vim.notify("No C++ compiler found. macOS: brew install gcc | Win: winget install MSYS2.MSYS2 then `pacman -S mingw-w64-ucrt-x86_64-gcc`", vim.log.levels.ERROR)
+		return
+	end
+	compiler = cpp_tools.to_config_path(compiler)
+
 	local lines = {
 		"CompileFlags:",
+		"  Compiler: " .. compiler,
+		"  Remove:",
+		'    - "-std=*"',
 		"  Add:",
-		"    - -std=c++17",
+		"    - -std=gnu++17",
 		"    - -Wall",
 		"    - -Wextra",
+		"    - -Wno-main",
 	}
 
-	for _, dir in ipairs(gcc_includes) do
-		table.insert(lines, "    - -I" .. dir)
-	end
-	for _, dir in ipairs(target_includes) do
-		table.insert(lines, "    - -I" .. dir)
-	end
-	if vim.fn.isdirectory("/usr/local/include") == 1 then
-		table.insert(lines, "    - -I/usr/local/include")
-	end
-
 	vim.fn.writefile(lines, ".clangd")
-	vim.notify("Wrote .clangd for C++ competitive programming headers", vim.log.levels.INFO)
-end, { desc = "C++: Write .clangd for bits/stdc++.h" })
+	vim.notify("Wrote .clangd using " .. compiler, vim.log.levels.INFO)
+	vim.cmd("LspRestart clangd")
+end, { desc = "C++: Configure clangd for competitive programming" })

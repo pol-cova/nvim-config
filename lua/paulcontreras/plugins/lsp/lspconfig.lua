@@ -93,43 +93,7 @@ return {
 			},
 		})
 
-		local function cpp_standard_library_flags()
-			local flags = {
-				"-std=c++17",
-				"-Wall",
-				"-Wextra",
-			}
-
-			for _, dir in ipairs(vim.fn.glob("/opt/homebrew/opt/gcc/include/c++/*", false, true)) do
-				table.insert(flags, "-I" .. dir)
-			end
-			for _, dir in ipairs(vim.fn.glob("/opt/homebrew/opt/gcc/include/c++/*/aarch64-apple-darwin*", false, true)) do
-				table.insert(flags, "-I" .. dir)
-			end
-			if vim.fn.isdirectory("/usr/local/include") == 1 then
-				table.insert(flags, "-I/usr/local/include")
-			end
-
-			return flags
-		end
-
-		-- Dynamically collect GCC executables so clangd can find GCC's include
-		-- paths, which helps resolve <bits/stdc++.h> on macOS.
-		local function query_drivers()
-			local drivers = {
-				"/usr/bin/clang",
-				"/usr/bin/clang++",
-				"/usr/bin/gcc",
-				"/usr/bin/g++",
-			}
-			for _, p in ipairs(vim.fn.glob("/opt/homebrew/bin/g++-*", false, true)) do
-				table.insert(drivers, p)
-			end
-			for _, p in ipairs(vim.fn.glob("/usr/local/bin/g++-*", false, true)) do
-				table.insert(drivers, p)
-			end
-			return table.concat(drivers, ",")
-		end
+		local cpp = require("paulcontreras.core.cpp")
 
 		local clangd_caps = vim.deepcopy(capabilities)
 		clangd_caps.offsetEncoding = { "utf-16" }
@@ -146,10 +110,10 @@ return {
 				"--fallback-style=llvm",
 				"--all-scopes-completion",
 				"--pch-storage=memory",
-				"--query-driver=" .. query_drivers(),
+				"--query-driver=" .. cpp.query_drivers(),
 			},
 			init_options = {
-				fallbackFlags = cpp_standard_library_flags(),
+				fallbackFlags = cpp.fallback_flags(),
 				usePlaceholders = true,
 				completeUnimported = true,
 				clangdFileStatus = true,
